@@ -736,11 +736,22 @@ class Renderer(object):
         for mesh in scene_meshes - self._meshes:
             for p in mesh.primitives:
                 p._add_to_context()
+            mesh._morphed_primitives = False
 
         # Remove old meshes from context
         for mesh in self._meshes - scene_meshes:
             for p in mesh.primitives:
                 p.delete()
+            mesh._morphed_primitives = False
+
+        # If a mesh is morphed, reattach the context
+        for mesh in self._meshes:
+            if mesh._morphed_primitives:
+                for p in mesh.primitives:
+                    if p._in_context():
+                        p.delete()
+                    p._add_to_context()
+                mesh._morphed_primitives = False
 
         self._meshes = scene_meshes.copy()
 

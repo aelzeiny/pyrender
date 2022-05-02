@@ -340,10 +340,10 @@ class Primitive(object):
 
         weighted_position = self._positions + np.sum(self.targets.positions * self._mesh_weights, axis=0)
         weighted_normal = None
-        if self._normals:
+        if self._normals is not None:
             weighted_normal = self._normals + np.sum(self.targets.normals * self._mesh_weights, axis=0)
         weighted_tangent = None
-        if self._tangents:
+        if self._tangents is not None:
             # Handedness (w) does not change per specification.
             tangent_w = self._tangents[:, 3]  # (n, )
             tangent_delta = np.sum(self.targets.tangents * self._mesh_weights, axis=0)  # (n, 3)

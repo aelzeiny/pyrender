@@ -37,6 +37,7 @@ class Mesh(object):
         self.is_visible = is_visible
 
         self._bounds = None
+        self._morphed_primitives = False
 
     @property
     def name(self):
@@ -70,8 +71,12 @@ class Mesh(object):
     @weights.setter
     def weights(self, value):
         self._weights = value
+        self._morphed_primitives = True
+        mesh_weights = value
+        if value is not None:
+            mesh_weights = self._weights[:, np.newaxis, np.newaxis]
         for primitive in self._primitives:
-            primitive.mesh_weights = self._weights
+            primitive.mesh_weights = mesh_weights
 
     @property
     def is_visible(self):
