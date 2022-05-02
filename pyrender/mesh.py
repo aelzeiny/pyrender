@@ -70,7 +70,8 @@ class Mesh(object):
     @weights.setter
     def weights(self, value):
         self._weights = value
-
+        for primitive in self._primitives:
+            primitive.mesh_weights = self._weights
 
     @property
     def is_visible(self):

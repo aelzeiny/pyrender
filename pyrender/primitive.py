@@ -10,7 +10,7 @@ import numpy as np
 
 from OpenGL.GL import *
 
-from .gltf_helper import load_accessors, load_attribute, TargetsCollection
+from .gltf_helper import load_accessors, load_attribute, AttributeType, TargetsCollection
 from .material import Material, MetallicRoughnessMaterial
 from .constants import FLOAT_SZ, UINT_SZ, BufFlags, GLTF
 from .utils import format_color_array
@@ -76,6 +76,10 @@ class Primitive(object):
         if mode is None:
             mode = GLTF.TRIANGLES
 
+        # morph targets
+        self._mesh_weights = None
+        self._weighted_attributes: typing.Optional[AttributeType] = None
+
         self.positions = positions
         self.normals = normals
         self.tangents = tangents
@@ -100,6 +104,8 @@ class Primitive(object):
     def positions(self):
         """(n,3) float : XYZ vertex positions.
         """
+        if self.mesh_weights is not None:
+            return self.weighted_attributes.position
         return self._positions
 
     @positions.setter
@@ -107,11 +113,14 @@ class Primitive(object):
         value = np.asanyarray(value, dtype=np.float32)
         self._positions = np.ascontiguousarray(value)
         self._bounds = None
+        self._weighted_attributes = None
 
     @property
     def normals(self):
         """(n,3) float : Normalized XYZ vertex normals.
         """
+        if self.mesh_weights is not None:
+            return self.weighted_attributes.normal
         return self._normals
 
     @normals.setter
@@ -121,12 +130,15 @@ class Primitive(object):
             value = np.ascontiguousarray(value)
             if value.shape != self.positions.shape:
                 raise ValueError('Incorrect normals shape')
+        self._weighted_attributes = None
         self._normals = value
 
     @property
     def tangents(self):
         """(n,4) float : XYZW vertex tangents.
         """
+        if self.mesh_weights is not None:
+            return self.weighted_attributes.tangent
         return self._tangents
 
     @tangents.setter
@@ -136,6 +148,7 @@ class Primitive(object):
             value = np.ascontiguousarray(value)
             if value.shape != (self.positions.shape[0], 4):
                 raise ValueError('Incorrect tangent shape')
+        self._weighted_attributes = None
         self._tangents = value
 
     @property
@@ -154,6 +167,7 @@ class Primitive(object):
                 raise ValueError('Incorrect texture coordinate shape')
             if value.shape[1] > 2:
                 value = value[:,:2]
+        self._weighted_attributes = None
         self._texcoord_0 = value
 
     @property
@@ -170,6 +184,7 @@ class Primitive(object):
             if (value.ndim != 2 or value.shape[0] != self.positions.shape[0] or
                     value.shape[1] != 2):
                 raise ValueError('Incorrect texture coordinate shape')
+        self._weighted_attributes = None
         self._texcoord_1 = value
 
     @property
@@ -184,6 +199,7 @@ class Primitive(object):
             value = np.ascontiguousarray(
                 format_color_array(value, shape=(len(self.positions), 4))
             )
+        self._weighted_attributes = None
         self._is_transparent = None
         self._color_0 = value
 
@@ -301,6 +317,55 @@ class Primitive(object):
         """(3,) float : The length of the diagonal of the primitive's AABB.
         """
         return np.linalg.norm(self.extents)
+
+    @property
+    def mesh_weights(self):
+        return self._mesh_weights
+
+    @mesh_weights.setter
+    def mesh_weights(self, value):
+        """See Also: https://www.khronos.org/registry/glTF/specs/2.0/glTF-2.0.html#morph-targets"""
+        if value is None or self.targets is None:
+            self._mesh_weights = None
+            self._weighted_attributes = None
+            return
+
+        # for easier multiplication, change shape from (n, ) to (n, 1)
+        if len(value.shape) == 1:
+            self._mesh_weights = value[:, np.newaxis, np.newaxis]
+        elif len(value.shape) == 3:
+            self._mesh_weights = value
+        else:
+            raise ValueError("Unexpected numpy array shape")
+
+        weighted_position = self._positions + np.sum(self.targets.positions * self._mesh_weights, axis=0)
+        weighted_normal = None
+        if self._normals:
+            weighted_normal = self._normals + np.sum(self.targets.normals * self._mesh_weights, axis=0)
+        weighted_tangent = None
+        if self._tangents:
+            # Handedness (w) does not change per specification.
+            tangent_w = self._tangents[:, 3]  # (n, )
+            tangent_delta = np.sum(self.targets.tangents * self._mesh_weights, axis=0)  # (n, 3)
+            weighted_tangent = self._tangents + np.append(tangent_delta, tangent_w[:, np.newaxis], axis=1)  # (n, 4)
+
+        # TODO: Add support for 'textcoord_0', 'texcoord_1', and 'color_0'.
+        self._weighted_attributes = AttributeType(
+            position=weighted_position,
+            normal=weighted_normal,
+            tangent=weighted_tangent,
+            textcoord_0=None,  # to be implemented
+            texcoord_1=None,  # to be implemented
+            color_0=None,  # to be implemented
+            joints_0=None,  # is never weighted
+            weights_0=None,  # is never weighted
+        )
+
+    @property
+    def weighted_attributes(self):
+        if self._mesh_weights is not None and self._weighted_attributes is None:
+            self.mesh_weights = self._mesh_weights  # recomputes weighted attributes
+        return self._weighted_attributes
 
     @property
     def buf_flags(self):
@@ -454,10 +519,17 @@ class Primitive(object):
         bounds = np.array([np.min(self.positions, axis=0),
                            np.max(self.positions, axis=0)])
 
-        # If instanced, compute translations for approximate bounds
+        # If poses instanced, compute translations for approximate bounds
         if self.poses is not None:
             bounds += np.array([np.min(self.poses[:,:3,3], axis=0),
                                 np.max(self.poses[:,:3,3], axis=0)])
+
+        # If targets instanced, compute translations for approximate bounds
+        if self.targets is not None:
+            bounds += np.array([
+                np.min(np.min(self.targets.positions, axis=0), axis=0),
+                np.max(np.max(self.targets.positions, axis=0), axis=0)
+            ])
         return bounds
 
     def _compute_transparency(self):
@@ -493,22 +565,24 @@ class Primitive(object):
         return buf_flags
 
     @staticmethod
-    def from_gltflib(primitive: gltflib.Primitive, materials: typing.List['Material'], accessors=None):
+    def from_gltflib(primitive: gltflib.Primitive, materials: typing.List['Material'],
+                     gltf: typing.Optional[gltflib.GLTF] = None, accessors=None):
+        assert gltf is not None or accessors is not None, 'Must specify either gltf file or accessors'
+        if accessors is None:
+            accessors = load_accessors(gltf)
         attr = load_attribute(primitive.attributes, accessors=accessors)
 
         targets = None
         if primitive.targets:
-            targets = TargetsCollection([load_attribute(attr, accessors) for attr in primitive.targets])
+            targets = [load_attribute(attr, accessors) for attr in primitive.targets]
         return Primitive(
             positions=attr.position,
             normals=attr.normal,
             tangents=attr.tangent,
             texcoord_0=attr.textcoord_0,
             color_0=attr.color_0,
-            # TODO: debug why models do not render when joints_0 or weights_0 are set.
-            #  https://github.com/KhronosGroup/glTF-Sample-Models/tree/master/2.0/Fox
-            # joints_0=np.array(attr.joints_0),
-            # weights_0=np.array(attr.weights_0),
+            joints_0=attr.joints_0,
+            weights_0=attr.weights_0,
             material=materials[primitive.material] if primitive.material is not None else None,
             indices=accessors[primitive.indices].reshape(-1, 3) if primitive.indices is not None else None,
             mode=primitive.mode,
