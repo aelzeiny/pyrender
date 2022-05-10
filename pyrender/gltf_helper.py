@@ -50,8 +50,8 @@ AttributeType = namedtuple(
 
 def _load_accessor(
     accessor: gltflib.Accessor,
-    accessor_buffer: bytes,
-    accessor_bufferview: gltflib.BufferView,
+    gltf: gltflib.GLTF,
+    bufferviews: List[bytes],
 ):
     """Converts gltflip.Accessor to pyrenderer.Accessor"""
     dtype = _TRIMESH_DTYPES[accessor.componentType]  # what is the datatype?
@@ -59,43 +59,69 @@ def _load_accessor(
     per_item = _SHAPE_LOOKUP[accessor.type]  # matrix dimensions?
     shape = np.append(accessor.count, per_item)  # use reported count to generate shape
     per_count = np.abs(np.product(per_item))  # 1D matrix dimensions?
-    data_start = accessor_bufferview.byteOffset + (accessor.byteOffset or 0)
-    if accessor.sparse:
-        # a "sparse" accessor should be initialized as zeros
-        return np.zeros(accessor.count * per_count, dtype=dtype).reshape(shape)
 
-    if accessor_bufferview.byteStride:
-        length = accessor_bufferview.byteStride * accessor.count
-        stride = (accessor_bufferview.byteStride, dtype_size)
-        buffer_data = np.frombuffer(accessor_buffer[data_start:data_start + length], dtype=dtype)
-        return np.lib.stride_tricks.as_strided(buffer_data, shape, stride)
+    if accessor.bufferView is not None:
+        accessor_bufferview = gltf.model.bufferViews[accessor.bufferView]
+        bufferview_bytes = bufferviews[accessor.bufferView]
+        data_start = accessor.byteOffset or 0
+        if accessor_bufferview.byteStride:
+            length = accessor_bufferview.byteStride * accessor.count
+            stride = (accessor_bufferview.byteStride, dtype_size)
+            buffer_data = np.frombuffer(bufferview_bytes[data_start:data_start + length], dtype=dtype)
+            accessor_data = np.lib.stride_tricks.as_strided(buffer_data, shape, stride)
+        else:
+            length = dtype_size * accessor.count * per_count
+            accessor_data = np.frombuffer(
+                bufferview_bytes[data_start:data_start + length],
+                dtype=dtype
+            ).reshape(shape)
     else:
-        length = dtype_size * accessor.count * per_count
-        return np.frombuffer(
-            accessor_buffer[data_start:data_start + length],
-            dtype=dtype
-        ).reshape(shape)
+        accessor_data = np.zeros(accessor.count * per_count, dtype=dtype).reshape(shape)
+
+    # sparse attributes will swap accessor_data at specific indices with specific values.
+    # https://github.com/KhronosGroup/glTF-Tutorials/blob/master/gltfTutorial/gltfTutorial_005_BuffersBufferViewsAccessors.md
+    if accessor.sparse is not None:
+        indices = np.frombuffer(
+            bufferviews[accessor.sparse.indices.bufferView][accessor.sparse.indices.byteOffset:],
+            dtype=_TRIMESH_DTYPES[accessor.sparse.indices.componentType],
+            count=accessor.sparse.count
+        )
+        value_shape = np.append(accessor.sparse.count, per_item)
+        values = np.frombuffer(
+            bufferviews[accessor.sparse.values.bufferView][accessor.sparse.values.byteOffset:],
+            dtype=dtype,
+        ).reshape(value_shape)
+
+        if not accessor_data.flags.writeable:  # remove immutability
+            accessor_data = accessor_data.copy()
+
+        for idx in range(accessor.sparse.count):
+            accessor_data[indices[idx]] = values[idx]
+
+    return accessor_data
 
 
-def load_accessors(gltf: gltflib.GLTF) -> AccessorType:
+def load_accessors(gltf: gltflib.GLTF, bufferviews: List[bytes]) -> AccessorType:
+    return [
+        _load_accessor(accessor, gltf, bufferviews)
+        for accessor in gltf.model.accessors
+    ]
+
+
+def load_bufferviews(gltf: gltflib.GLTF) -> List[bytes]:
+    buffers = []
     for buffer in gltf.model.buffers:
         resource = gltf.get_resource(buffer.uri)
         if isinstance(resource, gltflib.FileResource):
             resource.load()
+        buffers.append(gltf.get_resource(buffer.uri).data)
 
-    buffers = [
-        gltf.get_resource(buffer.uri).data
-        for buffer in gltf.model.buffers
-    ]
-
-    return [
-        _load_accessor(
-            accessor,
-            buffers[gltf.model.bufferViews[accessor.bufferView].buffer],
-            gltf.model.bufferViews[accessor.bufferView]
-        )
-        for accessor in gltf.model.accessors
-    ]
+    bufferviews = []
+    for bufferview in gltf.model.bufferViews:
+        buffer_start = bufferview.byteOffset or 0
+        buffer_end = buffer_start + bufferview.byteLength or 0
+        bufferviews.append(buffers[bufferview.buffer][buffer_start:buffer_end])
+    return bufferviews
 
 
 def _flip_texcoord(texcoord: 'np.typing.NDArray[float]') -> 'np.typing.NDArray[float]':
@@ -108,24 +134,23 @@ def _flip_texcoord(texcoord: 'np.typing.NDArray[float]') -> 'np.typing.NDArray[f
 def load_attribute(attribute: gltflib.Attributes, accessors: AccessorType) -> AttributeType:
     return AttributeType(
         accessors[attribute.POSITION],
-        accessors[attribute.NORMAL] if attribute.NORMAL else None,
-        accessors[attribute.TANGENT] if attribute.TANGENT else None,
-        _flip_texcoord(accessors[attribute.TEXCOORD_0]) if attribute.TEXCOORD_0 else None,
-        _flip_texcoord(accessors[attribute.TEXCOORD_1]) if attribute.TEXCOORD_1 else None,
-        accessors[attribute.COLOR_0] if attribute.COLOR_0 else None,
-        accessors[attribute.JOINTS_0] if attribute.JOINTS_0 else None,
-        accessors[attribute.WEIGHTS_0] if attribute.WEIGHTS_0 else None,
+        accessors[attribute.NORMAL] if attribute.NORMAL is not None else None,
+        accessors[attribute.TANGENT] if attribute.TANGENT is not None else None,
+        _flip_texcoord(accessors[attribute.TEXCOORD_0]) if attribute.TEXCOORD_0 is not None else None,
+        _flip_texcoord(accessors[attribute.TEXCOORD_1]) if attribute.TEXCOORD_1 is not None else None,
+        accessors[attribute.COLOR_0] if attribute.COLOR_0 is not None else None,
+        accessors[attribute.JOINTS_0] if attribute.JOINTS_0 is not None else None,
+        accessors[attribute.WEIGHTS_0] if attribute.WEIGHTS_0 is not None else None,
     )
 
 
-def load_image(image: gltflib.Image, gltf: gltflib.GLTF) -> 'PIL.Image.Image':
-    resource = gltf.get_resource(image.uri)
+def load_image(image: gltflib.Image, gltf: gltflib.GLTF, bufferviews: List[bytes]) -> 'PIL.Image.Image':
     if image.bufferView:
-        image_buffer_view = gltf.model.bufferViews[image.bufferView]
-        image_bytes = resource.data[
-            image_buffer_view.byteOffset:image_buffer_view.byteOffset+image_buffer_view.byteLength
-        ]
+        image_bytes = bufferviews[image.bufferView]
     else:
+        resource = gltf.get_resource(image.uri)
+        if isinstance(resource, gltflib.FileResource):
+            resource.load()
         image_bytes = resource.data
     return PIL.Image.open(BytesIO(image_bytes))
 

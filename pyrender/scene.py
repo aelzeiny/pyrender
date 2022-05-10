@@ -14,7 +14,7 @@ from .camera import Camera
 from .light import Light, PointLight, DirectionalLight, SpotLight
 from .node import Node
 from .utils import format_color_vector
-from .gltf_helper import load_accessors, load_image
+from .gltf_helper import load_bufferviews, load_accessors, load_image
 
 
 class Scene(object):
@@ -588,16 +588,37 @@ class Scene(object):
         return scene_pr
 
     @staticmethod
-    def from_gltflib_scene(gltf: gltflib.GLTF):
-        accessors = load_accessors(gltf)
-        scene = Scene()
+    def from_gltflib_scene(gltf: gltflib.GLTF, bg_color=None, ambient_light=None):
+        bufferviews = load_bufferviews(gltf)
+        accessors = load_accessors(gltf, bufferviews)
+        scene_pr = Scene(bg_color=bg_color, ambient_light=ambient_light)
         materials = None
         if gltf.model.materials:
-            images = None
-            if gltf.model.images:
-                images = [load_image(img, gltf) for img in gltf.model.images]
+            images = [load_image(img, gltf, bufferviews) for img in gltf.model.images or []]
             materials = [MetallicRoughnessMaterial.from_gltflib(mat, gltf, images) for mat in gltf.model.materials]
-        for mesh in gltf.model.meshes:
-            scene.add(Mesh.from_gltflib(mesh, gltf, accessors=accessors, material=materials))
-        # TODO: Add camera & other nodes to scene
-        return scene
+        meshes = [Mesh.from_gltflib(mesh, gltf, accessors=accessors, material=materials) for mesh in gltf.model.meshes]
+        nodes = [
+            Node(
+                name=node.name,
+                camera=None,  # TODO
+                mesh=meshes[node.mesh] if node.mesh is not None else None,
+                translation=np.array(node.translation) if node.translation is not None else None,
+                scale=np.array(node.scale) if node.scale is not None else None,
+                rotation=np.array(node.rotation) if node.rotation is not None else None,
+                matrix=np.array(node.matrix).reshape(4, 4).T if node.matrix is not None else None,
+                weights=np.array(node.weights) if node.weights is not None else None,
+                light=None,  # TODO
+                skin=None,  # TODO
+            )
+            for node in gltf.model.nodes
+        ]
+        chlidren_nodes = set()
+        for i, node in enumerate(nodes):
+            node_info = gltf.model.nodes[i]
+            node.children = [nodes[n] for n in node_info.children or []]
+            if node_info.children:
+                chlidren_nodes.update(node_info.children)
+        for i, node in enumerate(nodes):
+            if i not in chlidren_nodes:
+                scene_pr.add_node(node)
+        return scene_pr

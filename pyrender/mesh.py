@@ -374,7 +374,7 @@ class Mesh(object):
                 Primitive.from_gltflib(primitive, materials, accessors=accessors)
                 for primitive in mesh.primitives
             ],
-            weights=np.array(mesh.weights),
+            weights=np.array(mesh.weights) if mesh.weights is not None else None,
             is_visible=is_visible,
             name=mesh.name
         )

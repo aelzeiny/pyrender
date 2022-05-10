@@ -504,13 +504,21 @@ class MetallicRoughnessMaterial(Material):
         textures |= all_textures
         return textures
 
-    @staticmethod
-    def from_gltflib(material: gltflib.Material, gltf: gltflib.GLTF, images: List['PIL.Image.Image']) -> 'MetallicRoughnessMaterial':
+    @classmethod
+    def _texture_from_gltflib(cls, texture_info: gltflib.TextureInfo, gltf, images):
+        texture = None
+        if texture_info:
+            texture_pointer = gltf.model.textures[texture_info.index]
+            texture = images[texture_pointer.source]
+        return texture
+
+    @classmethod
+    def from_gltflib(cls, material: gltflib.Material, gltf: gltflib.GLTF, images: List['PIL.Image.Image']) -> 'MetallicRoughnessMaterial':
         metallic_roughness_kwargs = dict(
             name=material.name,
-            normalTexture=material.normalTexture,
-            occlusionTexture=material.occlusionTexture,
-            emissiveTexture=material.emissiveTexture,
+            normalTexture=cls._texture_from_gltflib(material.normalTexture, gltf, images),
+            occlusionTexture=cls._texture_from_gltflib(material.occlusionTexture, gltf, images),
+            emissiveTexture=cls._texture_from_gltflib(material.emissiveTexture, gltf, images),
             emissiveFactor=material.emissiveFactor,
             alphaMode=material.alphaMode,
             alphaCutoff=material.alphaCutoff,
@@ -518,17 +526,13 @@ class MetallicRoughnessMaterial(Material):
         )
 
         if material.pbrMetallicRoughness:
-            base_color_texture = None
-            if material.pbrMetallicRoughness.baseColorTexture:
-                texture_pointer = gltf.model.textures[material.pbrMetallicRoughness.baseColorTexture.index]
-                base_color_texture = images[texture_pointer.source]
-
             metallic_roughness_kwargs.update(dict(
                 baseColorFactor=material.pbrMetallicRoughness.baseColorFactor,
-                baseColorTexture=base_color_texture,
+                baseColorTexture=cls._texture_from_gltflib(material.pbrMetallicRoughness.baseColorTexture, gltf, images),
                 metallicFactor=material.pbrMetallicRoughness.metallicFactor,
                 roughnessFactor=material.pbrMetallicRoughness.roughnessFactor,
-                metallicRoughnessTexture=material.pbrMetallicRoughness.metallicRoughnessTexture
+                metallicRoughnessTexture=cls._texture_from_gltflib(
+                    material.pbrMetallicRoughness.metallicRoughnessTexture, gltf, images),
             ))
 
         return MetallicRoughnessMaterial(**metallic_roughness_kwargs)

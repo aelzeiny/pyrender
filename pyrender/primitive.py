@@ -10,7 +10,7 @@ import numpy as np
 
 from OpenGL.GL import *
 
-from .gltf_helper import load_accessors, load_attribute
+from .gltf_helper import load_accessors, load_attribute, TargetsCollection
 from .material import Material, MetallicRoughnessMaterial
 from .constants import FLOAT_SZ, UINT_SZ, BufFlags, GLTF
 from .utils import format_color_array
@@ -52,8 +52,8 @@ class Primitive(object):
         - ``4``: TRIANGLES
         - ``5``: TRIANGLES_STRIP
         - ``6``: TRIANGLES_FAN
-    targets : (k,) int
-        Morph target indices.
+    targets : :class:`TargetsCollection`
+        Morph target attributes
     poses : (x,4,4), float
         Array of 4x4 transformation matrices for instancing this object.
     """
@@ -502,15 +502,17 @@ class Primitive(object):
 
         targets = None
         if primitive.targets:
-            targets = [load_attribute(attr, accessors) for attr in primitive.targets]
+            targets = TargetsCollection([load_attribute(attr, accessors) for attr in primitive.targets])
         return Primitive(
             positions=attr.position,
             normals=attr.normal,
             tangents=attr.tangent,
             texcoord_0=attr.textcoord_0,
             color_0=attr.color_0,
-            joints_0=attr.joints_0,
-            weights_0=attr.weights_0,
+            # TODO: debug why models do not render when joints_0 or weights_0 are set.
+            #  https://github.com/KhronosGroup/glTF-Sample-Models/tree/master/2.0/Fox
+            # joints_0=np.array(attr.joints_0),
+            # weights_0=np.array(attr.weights_0),
             material=materials[primitive.material] if primitive.material is not None else None,
             indices=accessors[primitive.indices].reshape(-1, 3) if primitive.indices is not None else None,
             mode=primitive.mode,
