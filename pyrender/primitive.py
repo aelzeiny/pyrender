@@ -574,15 +574,17 @@ class Primitive(object):
 
         targets = None
         if primitive.targets:
-            targets = [load_attribute(attr, accessors) for attr in primitive.targets]
+            targets = TargetsCollection([load_attribute(attr, accessors) for attr in primitive.targets])
         return Primitive(
             positions=attr.position,
             normals=attr.normal,
             tangents=attr.tangent,
             texcoord_0=attr.textcoord_0,
             color_0=attr.color_0,
-            joints_0=attr.joints_0,
-            weights_0=attr.weights_0,
+            # TODO: debug why models do not render when joints_0 or weights_0 are set.
+            #  https://github.com/KhronosGroup/glTF-Sample-Models/tree/master/2.0/Fox
+            # joints_0=np.array(attr.joints_0),
+            # weights_0=np.array(attr.weights_0),
             material=materials[primitive.material] if primitive.material is not None else None,
             indices=accessors[primitive.indices].reshape(-1, 3) if primitive.indices is not None else None,
             mode=primitive.mode,
