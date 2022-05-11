@@ -493,11 +493,7 @@ class Primitive(object):
         return buf_flags
 
     @staticmethod
-    def from_gltflib(primitive: gltflib.Primitive, materials: typing.List['Material'],
-                     gltf: typing.Optional[gltflib.GLTF] = None, accessors=None):
-        assert gltf is not None or accessors is not None, 'Must specify either gltf file or accessors'
-        if accessors is None:
-            accessors = load_accessors(gltf)
+    def from_gltflib(primitive: gltflib.Primitive, materials: typing.List['Material'], accessors=None):
         attr = load_attribute(primitive.attributes, accessors=accessors)
 
         targets = None

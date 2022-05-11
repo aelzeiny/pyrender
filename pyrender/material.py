@@ -6,7 +6,7 @@ https://github.com/KhronosGroup/glTF/tree/master/extensions/2.0/Khronos/KHR_mate
 Author: Matthew Matl
 """
 import abc
-from typing import List
+from typing import List, Optional
 
 import PIL
 import gltflib
@@ -513,7 +513,7 @@ class MetallicRoughnessMaterial(Material):
         return texture
 
     @classmethod
-    def from_gltflib(cls, material: gltflib.Material, gltf: gltflib.GLTF, images: List['PIL.Image.Image']) -> 'MetallicRoughnessMaterial':
+    def from_gltflib(cls, material: gltflib.Material, gltf: gltflib.GLTF, images: List['PIL.Image.Image'] = None) -> 'MetallicRoughnessMaterial':
         metallic_roughness_kwargs = dict(
             name=material.name,
             normalTexture=cls._texture_from_gltflib(material.normalTexture, gltf, images),

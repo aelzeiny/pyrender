@@ -133,7 +133,7 @@ def _flip_texcoord(texcoord: 'np.typing.NDArray[float]') -> 'np.typing.NDArray[f
 
 def load_attribute(attribute: gltflib.Attributes, accessors: AccessorType) -> AttributeType:
     return AttributeType(
-        accessors[attribute.POSITION],
+        accessors[attribute.POSITION] if attribute.POSITION is not None else None,
         accessors[attribute.NORMAL] if attribute.NORMAL is not None else None,
         accessors[attribute.TANGENT] if attribute.TANGENT is not None else None,
         _flip_texcoord(accessors[attribute.TEXCOORD_0]) if attribute.TEXCOORD_0 is not None else None,

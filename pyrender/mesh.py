@@ -331,7 +331,7 @@ class Mesh(object):
         return colors, texcoords, material
 
     @staticmethod
-    def from_gltflib(mesh, gltf: gltflib.GLTF, accessors=None, material=None, images=None, is_visible=True):
+    def from_gltflib(mesh, gltf: gltflib.GLTF, accessors=None, material=None, is_visible=True):
         """Create a Mesh from a :class:`~gltflib.Mesh`.
 
         Parameters
@@ -359,13 +359,9 @@ class Mesh(object):
             accessors = load_accessors(gltf)
 
         if isinstance(material, Material):
-            materials = [material]
+            materials = [material] * len(gltf.model.materials)
         elif isinstance(material, list):
             materials = material
-        elif gltf.model.materials:
-            if images is None:
-                images = [load_image(img, gltf) for img in gltf.model.images]
-            materials = [MetallicRoughnessMaterial.from_gltflib(mat, gltf, images) for mat in gltf.model.materials]
         else:
             materials = None
 
